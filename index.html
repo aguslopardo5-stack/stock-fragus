@@ -270,6 +270,26 @@ Mate acero inox, 14"></textarea>
     <!-- AJUSTES -->
     <div class="panel" id="panel-ajustes">
       <div class="card">
+        <h2>Contraseña de seguridad</h2>
+        <p class="muted" style="margin-top:-6px;">Si configurás una contraseña, te la va a pedir antes de borrar el historial o reiniciar todo.</p>
+        <div class="row cols-2" id="currentPasswordRow" style="margin-top:10px;display:none;">
+          <div class="field">
+            <label>Contraseña actual</label>
+            <input type="password" id="currentPassword" placeholder="Requerida para cambiarla">
+          </div>
+        </div>
+        <div class="row cols-2" style="margin-top:10px;">
+          <div class="field">
+            <label>Nueva contraseña</label>
+            <input type="password" id="newPassword" placeholder="Dejar vacío para quitarla">
+          </div>
+          <div class="field" style="display:flex;align-items:flex-end;">
+            <button class="btn btn-primary" style="width:100%" onclick="savePassword()">Guardar contraseña</button>
+          </div>
+        </div>
+        <div class="muted" id="passwordStatus" style="margin-top:4px;"></div>
+      </div>
+      <div class="card">
         <h2>Ajustes</h2>
         <div class="settings-line">
           <div>
@@ -295,7 +315,11 @@ Mate acero inox, 14"></textarea>
 <div id="confirmOverlay" style="display:none;position:fixed;inset:0;background:rgba(43,32,19,.45);z-index:200;align-items:center;justify-content:center;">
   <div style="background:var(--surface-2);border-radius:var(--radius);padding:24px;max-width:360px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,.25);">
     <h3 id="confirmTitle" style="font-family:'Fraunces',serif;margin:0 0 8px;font-size:18px;">¿Confirmás?</h3>
-    <p id="confirmMsg" class="muted" style="margin:0 0 18px;"></p>
+    <p id="confirmMsg" class="muted" style="margin:0 0 14px;"></p>
+    <div id="confirmPasswordField" style="display:none;margin-bottom:14px;">
+      <label>Contraseña</label>
+      <input type="password" id="confirmPasswordInput" placeholder="Ingresá la contraseña" onkeydown="if(event.key==='Enter')closeConfirm(true)">
+    </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button class="btn btn-ghost btn-sm" onclick="closeConfirm(false)">Cancelar</button>
       <button class="btn btn-danger btn-sm" onclick="closeConfirm(true)">Sí, confirmar</button>
@@ -339,13 +363,31 @@ function showToast(msg){
   setTimeout(()=>t.classList.remove('show'), 2200);
 }
 
+const ADMIN_PW_KEY = 'fragus-admin-pw';
 let confirmCallback = null;
-function askConfirm(message, onYes){
+let confirmRequiresPassword = false;
+
+function askConfirm(message, onYes, requiresPassword){
   document.getElementById('confirmMsg').textContent = message;
   document.getElementById('confirmOverlay').style.display = 'flex';
   confirmCallback = onYes;
+  const storedPw = localStorage.getItem(ADMIN_PW_KEY);
+  confirmRequiresPassword = !!(requiresPassword && storedPw);
+  const pwField = document.getElementById('confirmPasswordField');
+  const pwInput = document.getElementById('confirmPasswordInput');
+  pwField.style.display = confirmRequiresPassword ? 'block' : 'none';
+  pwInput.value = '';
+  if(confirmRequiresPassword) setTimeout(()=>pwInput.focus(), 50);
 }
 function closeConfirm(yes){
+  if(yes && confirmRequiresPassword){
+    const entered = document.getElementById('confirmPasswordInput').value;
+    const storedPw = localStorage.getItem(ADMIN_PW_KEY);
+    if(entered !== storedPw){
+      showToast('Contraseña incorrecta');
+      return;
+    }
+  }
   document.getElementById('confirmOverlay').style.display = 'none';
   if(yes && confirmCallback){ confirmCallback(); }
   confirmCallback = null;
@@ -676,7 +718,7 @@ function clearSalesHistory(){
     data.sales = [];
     saveData();
     renderAll();
-  });
+  }, true);
 }
 
 function resetAll(){
@@ -684,7 +726,7 @@ function resetAll(){
     data = { products: [], sales: [] };
     saveData();
     renderAll();
-  });
+  }, true);
 }
 
 function renderHistory(){
@@ -836,6 +878,40 @@ function renderTopProducts(){
   wrap.innerHTML = rows;
 }
 
+function savePassword(){
+  const existing = localStorage.getItem(ADMIN_PW_KEY);
+  const pw = document.getElementById('newPassword').value;
+
+  if(existing){
+    const current = document.getElementById('currentPassword').value;
+    if(current !== existing){
+      showToast('Contraseña actual incorrecta');
+      return;
+    }
+  }
+
+  if(pw){
+    localStorage.setItem(ADMIN_PW_KEY, pw);
+    showToast('Contraseña guardada');
+  }else{
+    localStorage.removeItem(ADMIN_PW_KEY);
+    showToast('Contraseña quitada');
+  }
+  document.getElementById('newPassword').value = '';
+  document.getElementById('currentPassword').value = '';
+  updatePasswordStatus();
+}
+
+function updatePasswordStatus(){
+  const el = document.getElementById('passwordStatus');
+  if(!el) return;
+  const hasPassword = !!localStorage.getItem(ADMIN_PW_KEY);
+  el.textContent = hasPassword
+    ? 'Contraseña activada: se pedirá antes de borrar historial o reiniciar todo.'
+    : 'Sin contraseña configurada — cualquiera puede borrar historial o reiniciar todo.';
+  document.getElementById('currentPasswordRow').style.display = hasPassword ? 'block' : 'none';
+}
+
 function renderAll(){
   renderStats();
   renderProducts();
@@ -844,6 +920,7 @@ function renderAll(){
   renderMonthlyReport();
   renderPaymentBreakdown();
   renderTopProducts();
+  updatePasswordStatus();
 }
 
 loadData();
