@@ -152,9 +152,10 @@
       <div class="card">
         <h2>Nueva venta</h2>
         <div class="row cols-3">
-          <div class="field">
+          <div class="field" style="position:relative;">
             <label>Producto</label>
-            <select id="saleProductSelect"></select>
+            <input id="saleSearch" placeholder="Escribí para buscar…" autocomplete="off" oninput="filterSaleDropdown()" onfocus="filterSaleDropdown()">
+            <div id="saleDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:8px;margin-top:4px;max-height:220px;overflow-y:auto;z-index:20;box-shadow:0 8px 24px rgba(0,0,0,.12);"></div>
           </div>
           <div class="field">
             <label>Cantidad</label>
@@ -169,6 +170,25 @@
       <div class="card" id="ticketCard" style="display:none;">
         <h2>Ticket actual</h2>
         <div class="ticket" id="ticketBody"></div>
+        <div class="field" style="margin-top:14px;max-width:220px;">
+          <label>Método de pago</label>
+          <select id="paymentMethod" onchange="renderTicket()">
+            <option value="Efectivo">Efectivo</option>
+            <option value="Tarjeta">Tarjeta</option>
+            <option value="Transferencia">Transferencia</option>
+            <option value="Otro">Otro</option>
+          </select>
+        </div>
+        <div class="field" id="installmentsField" style="margin-top:10px;max-width:220px;display:none;">
+          <label>Cuotas</label>
+          <select id="installments" onchange="renderTicket()">
+            <option value="1">1 cuota (sin recargo)</option>
+            <option value="3">3 cuotas (+15%)</option>
+            <option value="6">6 cuotas (+22%)</option>
+            <option value="9">9 cuotas (+27%)</option>
+            <option value="12">12 cuotas (+32%)</option>
+          </select>
+        </div>
         <div style="display:flex;gap:10px;margin-top:16px;">
           <button class="btn btn-accent" onclick="confirmSale()">Confirmar venta</button>
           <button class="btn btn-ghost" onclick="clearTicket()">Cancelar</button>
@@ -203,6 +223,16 @@ Bombilla acero, Bombillas, 3200, 40, 5, 1200
 Yerbera cerámica, Yerberas, 6000, 15, 4"></textarea>
           <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="bulkImport()">Importar líneas</button>
         </details>
+
+        <details class="help" style="margin-top:14px;">
+          <summary>¿Ya cargaste los productos y solo querés actualizar el stock? Usá esto</summary>
+          <p>Pegá una línea por producto con el <b>nombre exacto</b> tal cual está en el sistema, seguido de la cantidad: <b>nombre, cantidad</b>. Si el nombre no coincide con ninguno cargado, te avisa cuáles no encontró.</p>
+          <textarea id="stockUpdateText" rows="5" placeholder="Mate imperial algarrobo, 16
+Mate ranchero, 6
+Mate acero inox, 14"></textarea>
+          <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="bulkStockUpdate()">Actualizar stock</button>
+          <div id="stockUpdateResult" class="muted" style="margin-top:8px;font-size:12px;"></div>
+        </details>
       </div>
 
       <div class="card">
@@ -217,6 +247,16 @@ Yerbera cerámica, Yerberas, 6000, 15, 4"></textarea>
 
     <!-- HISTORIAL -->
     <div class="panel" id="panel-historial">
+      <div class="row cols-2">
+        <div class="card">
+          <h2>Por método de pago (este mes)</h2>
+          <div id="paymentBreakdown"></div>
+        </div>
+        <div class="card">
+          <h2>Más vendidos</h2>
+          <div id="topProducts"></div>
+        </div>
+      </div>
       <div class="card">
         <h2>Facturación por mes</h2>
         <div id="monthlyReport"></div>
@@ -368,6 +408,38 @@ function bulkImport(){
   showToast(count + ' productos importados');
 }
 
+function bulkStockUpdate(){
+  const raw = document.getElementById('stockUpdateText').value.trim();
+  if(!raw){ return; }
+  const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
+  let updated = 0;
+  const notFound = [];
+  lines.forEach(line=>{
+    const parts = line.split(',').map(p=>p.trim());
+    if(parts.length < 2) return;
+    const name = parts[0];
+    const qty = parseInt(parts[1]);
+    if(isNaN(qty)) return;
+    const product = data.products.find(p=>p.name.toLowerCase() === name.toLowerCase());
+    if(product){
+      product.stock = qty;
+      updated++;
+    }else{
+      notFound.push(name);
+    }
+  });
+  document.getElementById('stockUpdateText').value = '';
+  saveData();
+  renderAll();
+  const resultDiv = document.getElementById('stockUpdateResult');
+  if(notFound.length===0){
+    resultDiv.textContent = `${updated} productos actualizados correctamente.`;
+  }else{
+    resultDiv.innerHTML = `${updated} actualizados. No se encontraron: <b>${notFound.join(', ')}</b>`;
+  }
+  showToast(updated + ' productos actualizados');
+}
+
 function deleteProduct(id){
   askConfirm('¿Eliminar este producto del inventario?', ()=>{
     data.products = data.products.filter(p=>p.id!==id);
@@ -437,23 +509,51 @@ function setCategory(c){
   renderProducts();
 }
 
-// ---------- SALE ----------
-function renderSaleSelect(){
-  const sel = document.getElementById('saleProductSelect');
+// ---------- SALE PRODUCT SEARCH ----------
+let selectedSaleProductId = null;
+
+function filterSaleDropdown(){
+  const term = document.getElementById('saleSearch').value.toLowerCase().trim();
+  const dropdown = document.getElementById('saleDropdown');
   if(data.products.length===0){
-    sel.innerHTML = `<option value="">Cargá productos primero</option>`;
+    dropdown.innerHTML = `<div style="padding:10px;color:var(--ink-soft);font-size:13px;">Cargá productos primero</div>`;
+    dropdown.style.display = 'block';
     return;
   }
-  sel.innerHTML = data.products.map(p=>
-    `<option value="${p.id}">${p.name} — ${money(p.price)} (stock: ${p.stock})</option>`
-  ).join('');
+  const matches = data.products.filter(p=>p.name.toLowerCase().includes(term)).slice(0,30);
+  if(matches.length===0){
+    dropdown.innerHTML = `<div style="padding:10px;color:var(--ink-soft);font-size:13px;">Sin resultados</div>`;
+  }else{
+    dropdown.innerHTML = matches.map(p=>
+      `<div style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13px;" onmousedown="selectSaleProduct('${p.id}')">
+        <div style="font-weight:600;">${p.name}</div>
+        <div class="muted">${money(p.price)} · stock: ${p.stock}</div>
+      </div>`
+    ).join('');
+  }
+  dropdown.style.display = 'block';
 }
 
+function selectSaleProduct(id){
+  const p = data.products.find(p=>p.id===id);
+  if(!p) return;
+  selectedSaleProductId = id;
+  document.getElementById('saleSearch').value = p.name;
+  document.getElementById('saleDropdown').style.display = 'none';
+}
+
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('#saleSearch') && !e.target.closest('#saleDropdown')){
+    const dd = document.getElementById('saleDropdown');
+    if(dd) dd.style.display = 'none';
+  }
+});
+
 function addToTicket(){
-  const id = document.getElementById('saleProductSelect').value;
+  const id = selectedSaleProductId;
   const qty = parseInt(document.getElementById('saleQty').value) || 1;
   const product = data.products.find(p=>p.id===id);
-  if(!product){ showToast('Elegí un producto.'); return; }
+  if(!product){ showToast('Elegí un producto de la lista.'); return; }
 
   const alreadyInTicket = currentTicket.find(t=>t.id===id);
   const usedQty = alreadyInTicket ? alreadyInTicket.qty : 0;
@@ -466,7 +566,26 @@ function addToTicket(){
   }else{
     currentTicket.push({ id, name: product.name, price: product.price, qty });
   }
+  document.getElementById('saleSearch').value = '';
+  document.getElementById('saleQty').value = 1;
+  selectedSaleProductId = null;
   renderTicket();
+}
+
+const CARD_SURCHARGE = {1:0, 3:0.15, 6:0.22, 9:0.27, 12:0.32};
+
+function computeTicketTotals(){
+  const subtotal = currentTicket.reduce((sum,item)=>sum + item.price*item.qty, 0);
+  const method = document.getElementById('paymentMethod') ? document.getElementById('paymentMethod').value : 'Efectivo';
+  let installments = 1;
+  let surchargePct = 0;
+  if(method === 'Tarjeta'){
+    installments = parseInt(document.getElementById('installments').value) || 1;
+    surchargePct = CARD_SURCHARGE[installments] || 0;
+  }
+  const surchargeAmt = Math.round(subtotal * surchargePct);
+  const total = subtotal + surchargeAmt;
+  return { subtotal, method, installments, surchargePct, surchargeAmt, total };
 }
 
 function renderTicket(){
@@ -479,13 +598,22 @@ function renderTicket(){
   }
   card.style.display='block';
   empty.style.display='none';
-  let total = 0;
+
+  const method = document.getElementById('paymentMethod').value;
+  document.getElementById('installmentsField').style.display = (method==='Tarjeta') ? 'block' : 'none';
+
+  const t = computeTicketTotals();
   const rows = currentTicket.map(item=>{
     const subtotal = item.price * item.qty;
-    total += subtotal;
     return `<div class="ticket-row"><span>${item.qty}x ${item.name}</span><span>${money(subtotal)}</span></div>`;
   }).join('');
-  document.getElementById('ticketBody').innerHTML = rows + `<div class="ticket-total"><span>TOTAL</span><span>${money(total)}</span></div>`;
+
+  let extra = '';
+  if(t.surchargePct > 0){
+    extra = `<div class="ticket-row"><span>Recargo tarjeta (${t.installments} cuotas, +${Math.round(t.surchargePct*100)}%)</span><span>${money(t.surchargeAmt)}</span></div>`;
+  }
+
+  document.getElementById('ticketBody').innerHTML = rows + extra + `<div class="ticket-total"><span>TOTAL</span><span>${money(t.total)}</span></div>`;
 }
 
 function clearTicket(){
@@ -495,13 +623,12 @@ function clearTicket(){
 
 function confirmSale(){
   if(currentTicket.length===0) return;
-  let total = 0;
-  let profit = 0;
+  const t = computeTicketTotals();
+  let profit = t.surchargeAmt; // surcharge is pure margin, no extra cost
   currentTicket.forEach(item=>{
     const product = data.products.find(p=>p.id===item.id);
     if(product){
       product.stock = Math.max(0, product.stock - item.qty);
-      total += item.price * item.qty;
       profit += (item.price - (product.cost||0)) * item.qty;
     }
   });
@@ -509,14 +636,20 @@ function confirmSale(){
     id: 's'+Date.now(),
     date: new Date().toISOString(),
     items: currentTicket.map(i=>({id:i.id, name:i.name, qty:i.qty, price:i.price})),
-    total,
+    subtotal: t.subtotal,
+    total: t.total,
     profit,
+    paymentMethod: t.method,
+    installments: t.installments,
+    surchargePct: t.surchargePct,
+    surchargeAmt: t.surchargeAmt,
     annulled: false
   });
   currentTicket = [];
+  document.getElementById('paymentMethod').value = 'Efectivo';
   saveData();
   renderAll();
-  showToast('Venta registrada — ' + money(total));
+  showToast('Venta registrada — ' + money(t.total));
 }
 
 // ---------- HISTORY ----------
@@ -568,9 +701,13 @@ function renderHistory(){
     const strike = sale.annulled ? 'text-decoration:line-through;opacity:.55;' : '';
     const annulLabel = sale.annulled ? '<span class="pill" style="background:var(--danger-soft);color:var(--danger);margin-left:8px;">ANULADA</span>' : '';
     const annulBtn = sale.annulled ? '' : `<button class="btn btn-ghost btn-sm" onclick="annulSale('${sale.id}')">Anular</button>`;
+    const paymentLabel = sale.paymentMethod === 'Tarjeta' && sale.installments > 1
+      ? `${sale.paymentMethod} ${sale.installments}c (+${Math.round((sale.surchargePct||0)*100)}%)`
+      : sale.paymentMethod;
+    const paymentPill = sale.paymentMethod ? `<span class="pill" style="margin-left:8px;">${paymentLabel}</span>` : '';
     return `<div class="settings-line">
       <div style="${strike}">
-        <div style="font-weight:600;">${dateStr} ${annulLabel}</div>
+        <div style="font-weight:600;">${dateStr} ${annulLabel}${paymentPill}</div>
         <div class="muted">${items}</div>
       </div>
       <div style="display:flex;align-items:center;gap:12px;">
@@ -643,13 +780,70 @@ function renderMonthlyReport(){
   </table>`;
 }
 
+function renderPaymentBreakdown(){
+  const wrap = document.getElementById('paymentBreakdown');
+  const now = new Date();
+  const monthSales = data.sales.filter(s=>{
+    if(s.annulled) return false;
+    const d = new Date(s.date);
+    return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+  });
+  if(monthSales.length===0){
+    wrap.innerHTML = `<div class="empty-state" style="padding:20px;"><p>Sin ventas este mes todavía.</p></div>`;
+    return;
+  }
+  const byMethod = {};
+  monthSales.forEach(s=>{
+    const m = s.paymentMethod || 'Sin especificar';
+    byMethod[m] = (byMethod[m]||0) + s.total;
+  });
+  const totalMonth = Object.values(byMethod).reduce((a,b)=>a+b,0);
+  const rows = Object.entries(byMethod).sort((a,b)=>b[1]-a[1]).map(([method,amount])=>{
+    const pct = Math.round((amount/totalMonth)*100);
+    return `<div class="settings-line">
+      <div><span class="pill">${method}</span></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-weight:600;">${money(amount)} <span class="muted">(${pct}%)</span></div>
+    </div>`;
+  }).join('');
+  wrap.innerHTML = rows;
+}
+
+function renderTopProducts(){
+  const wrap = document.getElementById('topProducts');
+  const validSales = data.sales.filter(s=>!s.annulled);
+  if(validSales.length===0){
+    wrap.innerHTML = `<div class="empty-state" style="padding:20px;"><p>Sin ventas todavía.</p></div>`;
+    return;
+  }
+  const byProduct = {};
+  validSales.forEach(s=>{
+    s.items.forEach(item=>{
+      if(!byProduct[item.name]) byProduct[item.name] = { qty: 0, revenue: 0 };
+      byProduct[item.name].qty += item.qty;
+      byProduct[item.name].revenue += item.qty * item.price;
+    });
+  });
+  const ranked = Object.entries(byProduct).sort((a,b)=>b[1].qty-a[1].qty).slice(0,8);
+  const rows = ranked.map(([name,info],i)=>
+    `<div class="settings-line">
+      <div><span class="qty-badge">#${i+1}</span> ${name}</div>
+      <div style="text-align:right;">
+        <div class="qty-badge">${info.qty} un.</div>
+        <div class="muted" style="font-size:11px;">${money(info.revenue)}</div>
+      </div>
+    </div>`
+  ).join('');
+  wrap.innerHTML = rows;
+}
+
 function renderAll(){
   renderStats();
   renderProducts();
-  renderSaleSelect();
   renderTicket();
   renderHistory();
   renderMonthlyReport();
+  renderPaymentBreakdown();
+  renderTopProducts();
 }
 
 loadData();
