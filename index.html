@@ -167,6 +167,24 @@
         </div>
       </div>
 
+      <div class="card">
+        <h2>Ítem personalizado</h2>
+        <p class="muted" style="margin-top:-6px;">Para cosas puntuales que no están en el inventario, como un grabado especial con precio distinto al estándar.</p>
+        <div class="row cols-3" style="margin-top:10px;">
+          <div class="field">
+            <label>Descripción</label>
+            <input id="customDesc" placeholder="Grabado especial en cuero">
+          </div>
+          <div class="field">
+            <label>Precio</label>
+            <input type="number" id="customPrice" placeholder="12000">
+          </div>
+          <div class="field" style="display:flex;align-items:flex-end;">
+            <button class="btn btn-ghost" style="width:100%" onclick="addCustomItem()">Agregar al ticket</button>
+          </div>
+        </div>
+      </div>
+
       <div class="card" id="ticketCard" style="display:none;">
         <h2>Ticket actual</h2>
         <div class="ticket" id="ticketBody"></div>
@@ -591,6 +609,19 @@ document.addEventListener('click', (e)=>{
   }
 });
 
+function addCustomItem(){
+  const desc = document.getElementById('customDesc').value.trim();
+  const price = parseFloat(document.getElementById('customPrice').value);
+  if(!desc || isNaN(price)){
+    showToast('Completá descripción y precio.');
+    return;
+  }
+  currentTicket.push({ id: null, name: desc, price, qty: 1, custom: true });
+  document.getElementById('customDesc').value = '';
+  document.getElementById('customPrice').value = '';
+  renderTicket();
+}
+
 function addToTicket(){
   const id = selectedSaleProductId;
   const qty = parseInt(document.getElementById('saleQty').value) || 1;
@@ -647,7 +678,8 @@ function renderTicket(){
   const t = computeTicketTotals();
   const rows = currentTicket.map(item=>{
     const subtotal = item.price * item.qty;
-    return `<div class="ticket-row"><span>${item.qty}x ${item.name}</span><span>${money(subtotal)}</span></div>`;
+    const tag = item.custom ? ' <span style="opacity:.6;">(personalizado)</span>' : '';
+    return `<div class="ticket-row"><span>${item.qty}x ${item.name}${tag}</span><span>${money(subtotal)}</span></div>`;
   }).join('');
 
   let extra = '';
@@ -668,6 +700,10 @@ function confirmSale(){
   const t = computeTicketTotals();
   let profit = t.surchargeAmt; // surcharge is pure margin, no extra cost
   currentTicket.forEach(item=>{
+    if(item.custom){
+      profit += item.price * item.qty; // custom items have no cost, full price is profit
+      return;
+    }
     const product = data.products.find(p=>p.id===item.id);
     if(product){
       product.stock = Math.max(0, product.stock - item.qty);
@@ -677,7 +713,7 @@ function confirmSale(){
   data.sales.push({
     id: 's'+Date.now(),
     date: new Date().toISOString(),
-    items: currentTicket.map(i=>({id:i.id, name:i.name, qty:i.qty, price:i.price})),
+    items: currentTicket.map(i=>({id:i.id, name:i.name, qty:i.qty, price:i.price, custom:i.custom||false})),
     subtotal: t.subtotal,
     total: t.total,
     profit,
