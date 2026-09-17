@@ -438,7 +438,7 @@ function addProduct(){
     showToast('Completá nombre, precio y stock.');
     return;
   }
-  data.products.push({ id: 'p'+Date.now()+Math.random().toString(36).slice(2,6), name, category: cat, price, cost, stock, min });
+  data.products.push({ id: 'p'+Date.now()+Math.random().toString(36).slice(2,6), name, category: cat, price, cost, stock, min, lastUpdated: new Date().toISOString() });
   ['pName','pCat','pPrice','pCost','pStock','pMin'].forEach(id=>document.getElementById(id).value='');
   saveData();
   renderAll();
@@ -459,7 +459,7 @@ function bulkImport(){
     const min = parseInt(minStr) || 3;
     const cost = parseFloat(costStr) || 0;
     if(!name || isNaN(price)) return;
-    data.products.push({ id: 'p'+Date.now()+Math.random().toString(36).slice(2,6)+count, name, category: cat || 'Otros', price, cost, stock, min });
+    data.products.push({ id: 'p'+Date.now()+Math.random().toString(36).slice(2,6)+count, name, category: cat || 'Otros', price, cost, stock, min, lastUpdated: new Date().toISOString() });
     count++;
   });
   document.getElementById('bulkText').value = '';
@@ -483,6 +483,7 @@ function bulkStockUpdate(){
     const product = data.products.find(p=>p.name.toLowerCase() === name.toLowerCase());
     if(product){
       product.stock = qty;
+      product.lastUpdated = new Date().toISOString();
       updated++;
     }else{
       notFound.push(name);
@@ -514,6 +515,7 @@ function updateProductField(id, field, value){
   if(field==='price') p.price = parseFloat(value)||0;
   if(field==='cost') p.cost = parseFloat(value)||0;
   if(field==='stock') p.stock = parseInt(value)||0;
+  p.lastUpdated = new Date().toISOString();
   saveData();
   renderAll();
 }
@@ -546,6 +548,7 @@ function renderProducts(){
     const low = p.stock <= p.min;
     const margin = p.cost ? p.price - p.cost : null;
     const marginPct = p.cost ? Math.round((margin/p.price)*100) : null;
+    const updatedStr = p.lastUpdated ? formatRelativeDate(p.lastUpdated) : '—';
     return `<tr class="${low?'low-stock':''}">
       <td>${p.name}</td>
       <td><span class="pill">${p.category}</span></td>
@@ -554,14 +557,30 @@ function renderProducts(){
       <td class="muted">${margin!==null ? money(margin)+' ('+marginPct+'%)' : '—'}</td>
       <td><input type="number" value="${p.stock}" style="width:70px" onchange="updateProductField('${p.id}','stock',this.value)"></td>
       <td class="qty-badge">${p.min}</td>
+      <td class="muted" style="font-size:11px;white-space:nowrap;">${updatedStr}</td>
       <td><button class="icon-btn" onclick="deleteProduct('${p.id}')">✕</button></td>
     </tr>`;
   }).join('');
 
   wrap.innerHTML = `<table>
-    <thead><tr><th>Producto</th><th>Categoría</th><th>P. venta</th><th>P. compra</th><th>Margen</th><th>Stock</th><th>Mín.</th><th></th></tr></thead>
+    <thead><tr><th>Producto</th><th>Categoría</th><th>P. venta</th><th>P. compra</th><th>Margen</th><th>Stock</th><th>Mín.</th><th>Actualizado</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+}
+
+function formatRelativeDate(isoString){
+  const d = new Date(isoString);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.floor(diffMs/60000);
+  const diffH = Math.floor(diffMin/60);
+  const diffDays = Math.floor(diffH/24);
+  if(diffMin < 1) return 'Recién';
+  if(diffMin < 60) return `Hace ${diffMin} min`;
+  if(diffH < 24) return `Hace ${diffH} h`;
+  if(diffDays === 1) return 'Ayer';
+  if(diffDays < 30) return `Hace ${diffDays} días`;
+  return d.toLocaleDateString('es-AR');
 }
 
 function setCategory(c){
@@ -676,10 +695,10 @@ function renderTicket(){
   document.getElementById('installmentsField').style.display = (method==='Tarjeta') ? 'block' : 'none';
 
   const t = computeTicketTotals();
-  const rows = currentTicket.map(item=>{
+  const rows = currentTicket.map((item,i)=>{
     const subtotal = item.price * item.qty;
     const tag = item.custom ? ' <span style="opacity:.6;">(personalizado)</span>' : '';
-    return `<div class="ticket-row"><span>${item.qty}x ${item.name}${tag}</span><span>${money(subtotal)}</span></div>`;
+    return `<div class="ticket-row"><span>${item.qty}x ${item.name}${tag}</span><span style="display:flex;align-items:center;gap:10px;">${money(subtotal)} <button class="icon-btn" style="font-family:'Work Sans',sans-serif;" onclick="removeFromTicket(${i})">✕</button></span></div>`;
   }).join('');
 
   let extra = '';
@@ -688,6 +707,11 @@ function renderTicket(){
   }
 
   document.getElementById('ticketBody').innerHTML = rows + extra + `<div class="ticket-total"><span>TOTAL</span><span>${money(t.total)}</span></div>`;
+}
+
+function removeFromTicket(index){
+  currentTicket.splice(index, 1);
+  renderTicket();
 }
 
 function clearTicket(){
@@ -707,6 +731,7 @@ function confirmSale(){
     const product = data.products.find(p=>p.id===item.id);
     if(product){
       product.stock = Math.max(0, product.stock - item.qty);
+      product.lastUpdated = new Date().toISOString();
       profit += (item.price - (product.cost||0)) * item.qty;
     }
   });
@@ -740,6 +765,7 @@ function annulSale(saleId){
       if(!product) product = data.products.find(p=>p.name===item.name);
       if(product){
         product.stock += item.qty;
+        product.lastUpdated = new Date().toISOString();
       }
     });
     sale.annulled = true;
@@ -813,6 +839,9 @@ function renderStats(){
   const lowStock = data.products.filter(p=>p.stock<=p.min).length;
   const totalUnitsInStock = data.products.reduce((sum,p)=>sum+p.stock,0);
 
+  const timestamps = data.products.filter(p=>p.lastUpdated).map(p=>new Date(p.lastUpdated).getTime());
+  const lastUpdateStr = timestamps.length ? formatRelativeDate(new Date(Math.max(...timestamps)).toISOString()) : 'Sin datos';
+
   document.getElementById('stats').innerHTML = `
     <div class="stat money"><div class="label">Ventas hoy</div><div class="value">${money(todayRevenue)}</div></div>
     <div class="stat"><div class="label">Unidades vendidas hoy</div><div class="value">${todayUnits}</div></div>
@@ -820,6 +849,7 @@ function renderStats(){
     <div class="stat money"><div class="label">Ingresos totales</div><div class="value">${money(totalRevenue)}</div></div>
     <div class="stat"><div class="label">Stock total</div><div class="value">${totalUnitsInStock}</div></div>
     <div class="stat ${lowStock>0?'alert':''}"><div class="label">Stock bajo</div><div class="value">${lowStock}</div></div>
+    <div class="stat"><div class="label">Último movimiento de stock</div><div class="value" style="font-size:18px;">${lastUpdateStr}</div></div>
   `;
 }
 
